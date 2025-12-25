@@ -40,8 +40,8 @@
 
     <div class="max-w-6xl mx-auto">
         
-        <!-- Header & Navigasi -->
-        <div class="bg-white rounded-t-2xl shadow-sm border-b border-gray-200 p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+        <!-- Header & Navigasi (Diberi ID agar bisa disembunyikan saat mode validasi) -->
+        <div id="app-header" class="bg-white rounded-t-2xl shadow-sm border-b border-gray-200 p-6 flex flex-col md:flex-row justify-between items-center gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-gray-800">eSurat</h1>
                 <p class="text-sm text-gray-500">SDN MEDOKAN AYU I/270</p>
@@ -267,7 +267,8 @@
                         <button onclick="copyValidationLink()" class="flex-1 bg-gray-100 text-gray-700 font-medium py-3 rounded-xl hover:bg-gray-200 transition-colors">
                             <i class="fas fa-link mr-1"></i> Salin Link Validasi
                         </button>
-                        <button onclick="resetScanner()" class="flex-1 bg-indigo-600 text-white font-medium py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+                        <!-- Tombol ini diberi ID agar bisa disembunyikan saat mode validasi link -->
+                        <button id="btn-rescan" onclick="resetScanner()" class="flex-1 bg-indigo-600 text-white font-medium py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
                             Scan Lagi
                         </button>
                     </div>
@@ -344,12 +345,30 @@
                         perihal: data.p
                     };
 
-                    // Pindah ke tab scan dan tampilkan hasil
-                    switchTab('scan');
+                    // --- MODE VALIDASI KHUSUS ---
+                    // Sembunyikan Header/Navigasi
+                    const header = document.getElementById('app-header');
+                    if(header) header.classList.add('hidden');
+
+                    // Sembunyikan Tab Lain
+                    document.getElementById('view-input').classList.add('hidden');
+                    document.getElementById('view-rekap').classList.add('hidden');
+
+                    // Tampilkan Container Scan (dan modifikasi agar terlihat full/tunggal)
+                    const viewScan = document.getElementById('view-scan');
+                    viewScan.classList.remove('hidden', 'rounded-b-2xl', 'shadow-lg'); // Hapus style container app
+                    viewScan.classList.add('rounded-2xl', 'min-h-screen', 'items-start', 'pt-10', 'bg-transparent', 'shadow-none'); // Style standalone
+
+                    // Sembunyikan Kamera
+                    document.getElementById('scan-camera-container').classList.add('hidden');
+
+                    // Tampilkan Kartu Hasil
                     displayVerificationResult(parsedData);
+
+                    // Sembunyikan tombol "Scan Lagi" (karena ini mode view-only)
+                    const btnRescan = document.getElementById('btn-rescan');
+                    if(btnRescan) btnRescan.classList.add('hidden');
                     
-                    // Bersihkan URL agar tidak scan ulang saat refresh (Opsional, tapi bagus untuk UX)
-                    // history.replaceState(null, null, ' '); 
                 } catch (e) {
                     console.error("Invalid Hash Link", e);
                     showToast("Link validasi tidak valid/rusak.", true);
