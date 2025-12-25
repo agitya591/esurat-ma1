@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem QR Code Surat & Arsip</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- QRCode.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- Dexie.js (Database Wrapper for IndexedDB) -->
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+    <!-- PDF-Lib (Untuk Manipulasi PDF) -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <!-- Download.js (Helper download) -->
+    <script src="https://unpkg.com/downloadjs@1.4.7/download.js"></script>
+    <!-- HTML5-QRCode (Scanner Library) -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .tab-active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+        .tab-inactive { color: #64748b; font-weight: 500; }
+        .tab-inactive:hover { color: #374151; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        /* Scanner Styles */
+        #reader video {
+            border-radius: 0.75rem;
+            object-fit: cover;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        
+        <!-- Header & Navigasi -->
+        <div class="bg-white rounded-t-2xl shadow-sm border-b border-gray-200 p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800">eSurat</h1>
+                <p class="text-sm text-gray-500">SDN MEDOKAN AYU I/270</p>
+            </div>
+            
+            <!-- Menu Tabs -->
+            <div class="flex space-x-6 overflow-x-auto">
+                <button onclick="switchTab('input')" id="tab-input" class="tab-active pb-2 transition-colors whitespace-nowrap">
+                    <i class="fas fa-qrcode mr-2"></i>Buat QR
+                </button>
+                <button onclick="switchTab('scan')" id="tab-scan" class="tab-inactive pb-2 transition-colors whitespace-nowrap">
+                    <i class="fas fa-camera mr-2"></i>Scan & Verifikasi
+                </button>
+                <button onclick="switchTab('rekap')" id="tab-rekap" class="tab-inactive pb-2 transition-colors whitespace-nowrap">
+                    <i class="fas fa-list mr-2"></i>Rekap Data
+                </button>
+            </div>
+        </div>
+
+        <!-- CONTENT 1: INPUT & GENERATOR -->
+        <div id="view-input" class="bg-white rounded-b-2xl shadow-lg overflow-hidden flex flex-col md:flex-row min-h-[600px]">
+            
+            <!-- Form Input (Kiri) -->
+            <div class="w-full md:w-5/12 p-6 md:p-8 border-r border-gray-100 overflow-y-auto max-h-[800px]">
+                <form id="qrForm" onsubmit="event.preventDefault(); processForm();">
+                    <!-- Data Surat -->
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">1. Data Surat</h3>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Nomor Surat</label>
+                        <input type="text" id="nomor" placeholder="Contoh: 001/HRD/2024" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tanggal</label>
+                        <input type="date" id="tanggal" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Perihal</label>
+                        <textarea id="perihal" rows="2" placeholder="Ringkasan isi surat..." 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" required></textarea>
+                    </div>
+
+                    <!-- Pilihan Mode QR (Baru) -->
+                    <div class="mb-4 bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                        <label class="flex items-center space-x-3 cursor-pointer">
+                            <input type="checkbox" id="useLinkMode" class="form-checkbox h-4 w-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500">
+                            <span class="text-sm font-medium text-gray-700">Gunakan QR Link Validasi</span>
+                        </label>
+                        <p class="text-[10px] text-gray-500 mt-1 ml-7 leading-tight">
+                            Jika dicentang, QR Code akan berisi Link URL. Saat discan kamera biasa, akan langsung membuka aplikasi ini untuk validasi. <br>
+                            <span class="text-red-500 font-semibold">*Pastikan aplikasi ini sudah di-hosting online.</span>
+                        </p>
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Logo QR (Tengah)</label>
+                        <div class="flex items-center space-x-3">
+                            <img id="logoPreview" class="h-8 w-8 object-contain rounded border bg-gray-50" src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Lambang_Kemdikbud.png/240px-Lambang_Kemdikbud.png">
+                            <input type="file" id="logoInput" accept="image/*" class="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                        </div>
+                    </div>
+
+                    <!-- Upload PDF -->
+                    <div class="border-t pt-4 mt-4">
+                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex justify-between items-center">
+                            2. Tempel ke Surat PDF 
+                        </h3>
+                        
+                        <div class="mb-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Upload File Surat (.pdf)</label>
+                            <input type="file" id="pdfInput" accept="application/pdf" onchange="analyzePDF(this)" 
+                                class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 mb-1">
+                            <p class="text-xs text-gray-500 italic">*Biarkan kosong jika hanya ingin QR Code gambar (PNG).</p>
+
+                            <!-- Opsi Posisi -->
+                            <div id="pdfOptions" class="hidden mt-4 pt-3 border-t border-blue-200 grid grid-cols-2 gap-3">
+                                <div class="col-span-2 flex justify-between items-center">
+                                    <p class="text-xs font-semibold text-blue-800">Pengaturan Posisi Tanda Tangan:</p>
+                                    <span class="text-[10px] bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full" id="pageInfoTag">Auto-Detect</span>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600">Halaman Ke-</label>
+                                    <input type="number" id="pdfPage" value="1" min="1" class="w-full px-2 py-1 border rounded text-xs bg-gray-50">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600">Tinggi TTE (px)</label>
+                                    <input type="number" id="pdfQRSize" value="150" class="w-full px-2 py-1 border rounded text-xs">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600">Posisi X (Kiri-Kanan)</label>
+                                    <input type="number" id="pdfX" value="350" class="w-full px-2 py-1 border rounded text-xs">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-600">Posisi Y (Bawah-Atas)</label>
+                                    <input type="number" id="pdfY" value="100" class="w-full px-2 py-1 border rounded text-xs">
+                                </div>
+                                <div class="col-span-2 text-[10px] text-gray-500 mt-1">
+                                    <i class="fas fa-info-circle mr-1"></i> Aplikasi otomatis mengatur posisi ke <b>Pojok Kanan Bawah</b> pada <b>Halaman Terakhir</b>.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3 mt-6">
+                        <button type="button" onclick="resetForm()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium">Reset</button>
+                        <button type="submit" id="btnGenerate" class="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-lg shadow-indigo-200 text-sm font-medium flex justify-center items-center gap-2">
+                           <i class="fas fa-magic"></i> Proses & Generate
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Preview Result (Kanan) -->
+            <div class="w-full md:w-7/12 p-8 bg-gray-50 flex flex-col items-center justify-center relative">
+                <!-- Loading Overlay -->
+                <div id="loadingOverlay" class="hidden absolute inset-0 bg-gray-50/90 z-10 flex flex-col items-center justify-center">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-3"></div>
+                    <p class="text-gray-600 text-sm font-medium">Sedang memproses PDF...</p>
+                </div>
+
+                <div id="placeholderState" class="text-center text-gray-400">
+                    <svg class="w-20 h-20 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    <p class="text-lg font-medium text-gray-500">Preview Dokumen</p>
+                    <p class="text-sm">Isi form dan upload PDF (opsional) untuk melihat hasil.</p>
+                </div>
+
+                <div id="resultState" class="hidden flex flex-col items-center w-full animate-fade-in h-full justify-center">
+                    
+                    <!-- Preview Box -->
+                    <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-6 text-center w-full max-w-lg">
+                        <h3 class="text-sm font-bold text-gray-800 mb-4 uppercase tracking-wider border-b pb-2">Hasil Tanda Tangan Elektronik</h3>
+                        
+                        <!-- QR Display -->
+                        <div id="qrcode" class="flex justify-center mb-4 overflow-auto"></div>
+                        
+                        <!-- Metadata -->
+                        <div class="text-left bg-gray-50 p-3 rounded text-sm text-gray-600 space-y-1 mb-4">
+                            <p><span class="font-semibold text-gray-800 w-16 inline-block">Nomor:</span> <span id="previewNomor">-</span></p>
+                            <p><span class="font-semibold text-gray-800 w-16 inline-block">Tanggal:</span> <span id="previewTanggal">-</span></p>
+                        </div>
+
+                        <!-- Status File PDF -->
+                        <div id="pdfStatusMsg" class="hidden mb-4 p-2 bg-blue-50 text-blue-700 text-xs rounded border border-blue-100 flex items-center justify-center gap-2">
+                            <i class="fas fa-file-pdf text-lg"></i>
+                            <span>PDF Surat berhasil digabungkan!</span>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex flex-col gap-3 w-full max-w-xs">
+                        <button id="btnDownloadPDF" onclick="downloadResultPDF()" class="hidden bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 shadow-lg shadow-red-200 items-center justify-center gap-2 font-medium transition-all">
+                            <i class="fas fa-file-pdf"></i> Download Surat (.pdf)
+                        </button>
+                        
+                        <button onclick="downloadQRImage()" class="bg-white text-gray-700 border border-gray-300 px-6 py-2 rounded-lg hover:bg-gray-50 items-center justify-center gap-2 text-sm flex font-medium">
+                            <i class="fas fa-image"></i> Download Gambar QR (.png)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONTENT 2: SCAN & VERIFIKASI (BARU) -->
+        <div id="view-scan" class="hidden bg-white rounded-b-2xl shadow-lg p-6 min-h-[500px] flex flex-col items-center justify-center">
+            
+            <!-- Scan State -->
+            <div id="scan-camera-container" class="w-full max-w-md text-center">
+                <h2 class="text-xl font-bold text-gray-800 mb-2">Scan QR Code</h2>
+                <p class="text-sm text-gray-500 mb-4">Arahkan kamera ke QR Code Tanda Tangan Elektronik.</p>
+                
+                <div class="bg-gray-100 rounded-xl overflow-hidden shadow-inner border border-gray-200 relative aspect-square max-w-sm mx-auto">
+                    <div id="reader" class="w-full h-full"></div>
+                    <div class="absolute inset-0 pointer-events-none border-2 border-indigo-500/50 z-10 m-8 rounded-lg animate-pulse"></div>
+                </div>
+                
+                <p class="text-xs text-gray-400 mt-4 italic">Pastikan ruangan cukup cahaya.</p>
+            </div>
+
+            <!-- Result State (Hidden by default) -->
+            <div id="scan-result" class="hidden w-full max-w-lg animate-fade-in">
+                <div class="bg-white border-2 border-green-500 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+                    <!-- Badge Verified -->
+                    <div class="absolute top-0 right-0 bg-green-500 text-white text-xs font-bold px-4 py-1 rounded-bl-xl">
+                        VERIFIED
+                    </div>
+
+                    <div class="text-center mb-6">
+                        <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i class="fas fa-check-circle text-3xl"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-gray-800">eSurat SDN Medokan Ayu I/270</h3>
+                        <h3 class="text-xl font-bold text-gray-800">Dokumen Valid</h3>
+                        <p class="text-sm text-gray-500">Detail Surat Teridentifikasi</p>
+                    </div>
+
+                    <div class="space-y-4 border-t border-b border-gray-100 py-4 mb-6">
+                        <div>
+                            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Nomor Surat</p>
+                            <p id="res-nomor" class="text-lg font-bold text-gray-800 font-mono">-</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Tanggal</p>
+                            <p id="res-tanggal" class="text-lg font-bold text-gray-800">-</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Perihal</p>
+                            <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                <p id="res-perihal" class="text-sm text-gray-700 leading-relaxed">-</p>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Penandatangan</p>
+                            <p class="text-sm font-bold text-gray-800">Kepala SDN Medokan Ayu I/270</p>
+                            <p class="text-sm text-gray-600">SELAMET PUJIONO , S.Pd.</p>
+                            <p class="text-xs text-gray-400">NIP.197405032006041012</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <button onclick="copyValidationLink()" class="flex-1 bg-gray-100 text-gray-700 font-medium py-3 rounded-xl hover:bg-gray-200 transition-colors">
+                            <i class="fas fa-link mr-1"></i> Salin Link Validasi
+                        </button>
+                        <button onclick="resetScanner()" class="flex-1 bg-indigo-600 text-white font-medium py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+                            Scan Lagi
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONTENT 3: REKAP DATA (DATABASE VIEW) -->
+        <div id="view-rekap" class="hidden bg-white rounded-b-2xl shadow-lg p-6 min-h-[500px]">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-gray-800">Riwayat Surat Keluar</h2>
+                <div class="relative">
+                    <input type="text" id="searchInput" onkeyup="searchTable()" placeholder="Cari nomor/perihal..." class="pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <svg class="w-4 h-4 text-gray-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border border-gray-200">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Tanggal</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Nomor Surat</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Perihal</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="bg-white divide-y divide-gray-200"></tbody>
+                </table>
+                <div id="emptyTableMsg" class="hidden text-center py-10 text-gray-500">Belum ada data tersimpan.</div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        Notifikasi
+    </div>
+
+    <script>
+        const { PDFDocument } = PDFLib;
+
+        // 1. SETUP DATABASE
+        const db = new Dexie("SuratDatabase");
+        db.version(1).stores({ surat: '++id, nomor, tanggal, perihal' });
+
+        const defaultLogoUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Lambang_Kemdikbud.png/240px-Lambang_Kemdikbud.png";
+        let currentLogoUrl = defaultLogoUrl;
+        let generatedPdfBytes = null;
+        let html5QrCode = null; // Scanner instance
+        let isScannerRunning = false; // Flag status scanner
+        let currentScannedData = null; // Menyimpan data scan terakhir untuk generate link
+        
+        document.getElementById('tanggal').valueAsDate = new Date();
+
+        // 0. AUTO CHECK HASH ON LOAD (New Feature)
+        window.onload = function() {
+            checkUrlHash();
+        }
+
+        function checkUrlHash() {
+            // Cek apakah ada data di URL (misal: #v=eyJub...)
+            const hash = window.location.hash;
+            if (hash && hash.startsWith('#v=')) {
+                try {
+                    const base64 = hash.substring(3); // Ambil data setelah #v=
+                    const json = atob(base64); // Decode Base64
+                    const data = JSON.parse(json); // Parse JSON
+                    
+                    // Format data agar sesuai dengan struktur displayVerificationResult
+                    const parsedData = {
+                        nomor: data.n,
+                        tanggal: data.t,
+                        perihal: data.p
+                    };
+
+                    // Pindah ke tab scan dan tampilkan hasil
+                    switchTab('scan');
+                    displayVerificationResult(parsedData);
+                    
+                    // Bersihkan URL agar tidak scan ulang saat refresh (Opsional, tapi bagus untuk UX)
+                    // history.replaceState(null, null, ' '); 
+                } catch (e) {
+                    console.error("Invalid Hash Link", e);
+                    showToast("Link validasi tidak valid/rusak.", true);
+                }
+            }
+        }
+
+        // 2. NAVIGASI TABS
+        function switchTab(tabName) {
+            const viewInput = document.getElementById('view-input');
+            const viewScan = document.getElementById('view-scan');
+            const viewRekap = document.getElementById('view-rekap');
+            
+            const tabInput = document.getElementById('tab-input');
+            const tabScan = document.getElementById('tab-scan');
+            const tabRekap = document.getElementById('tab-rekap');
+
+            // Reset States
+            viewInput.classList.add('hidden');
+            viewScan.classList.add('hidden');
+            viewRekap.classList.add('hidden');
+            
+            tabInput.className = 'tab-inactive pb-2 transition-colors whitespace-nowrap';
+            tabScan.className = 'tab-inactive pb-2 transition-colors whitespace-nowrap';
+            tabRekap.className = 'tab-inactive pb-2 transition-colors whitespace-nowrap';
+
+            if (tabName !== 'scan') {
+                stopScannerSafe();
+            }
+
+            if (tabName === 'input') {
+                viewInput.classList.remove('hidden');
+                tabInput.className = 'tab-active pb-2 transition-colors whitespace-nowrap';
+            } else if (tabName === 'scan') {
+                viewScan.classList.remove('hidden');
+                tabScan.className = 'tab-active pb-2 transition-colors whitespace-nowrap';
+                // Jangan start scanner otomatis jika kita masuk karena Hash/Link
+                const hash = window.location.hash;
+                if (!hash.startsWith('#v=')) {
+                    startScanner();
+                }
+            } else {
+                viewRekap.classList.remove('hidden');
+                tabRekap.className = 'tab-active pb-2 transition-colors whitespace-nowrap';
+                loadTableData();
+            }
+        }
+
+        // 3. SCANNER LOGIC (FIXED)
+        function startScanner() {
+            document.getElementById('scan-camera-container').classList.remove('hidden');
+            document.getElementById('scan-result').classList.add('hidden');
+
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode("reader");
+            }
+
+            if (isScannerRunning) return;
+
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+            
+            html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+            .then(() => { isScannerRunning = true; })
+            .catch(err => {
+                console.error("Error starting scanner", err);
+                isScannerRunning = false;
+            });
+        }
+
+        function stopScannerSafe() {
+            if (html5QrCode && isScannerRunning) {
+                isScannerRunning = false; 
+                html5QrCode.stop().then(() => {
+                    html5QrCode.clear();
+                }).catch(err => console.warn("Scanner stop warning:", err));
+            }
+        }
+
+        function onScanSuccess(decodedText, decodedResult) {
+            if (!isScannerRunning) return;
+            stopScannerSafe();
+
+            // Cek apakah ini URL Hash kita sendiri
+            if (decodedText.includes('#v=')) {
+                const parts = decodedText.split('#v=');
+                if (parts.length > 1) {
+                    try {
+                        const json = atob(parts[1]);
+                        const data = JSON.parse(json);
+                        displayVerificationResult({
+                            nomor: data.n,
+                            tanggal: data.t,
+                            perihal: data.p
+                        });
+                        return;
+                    } catch (e) { console.error("Parse URL QR Error", e); }
+                }
+            }
+
+            // Fallback: Parse Data Teks Biasa
+            const data = {};
+            const lines = decodedText.split('\n');
+            lines.forEach(line => {
+                if(line.startsWith("Nomor:")) data.nomor = line.replace("Nomor:", "").trim();
+                if(line.startsWith("Tanggal:")) data.tanggal = line.replace("Tanggal:", "").trim();
+                if(line.startsWith("Perihal:")) data.perihal = line.replace("Perihal:", "").trim();
+            });
+
+            if(data.nomor) {
+                displayVerificationResult(data);
+            } else {
+                alert("QR Code tidak dikenali atau bukan format surat dari aplikasi ini.");
+                setTimeout(() => {
+                    if(document.getElementById('tab-scan').classList.contains('tab-active')) startScanner();
+                }, 500);
+            }
+        }
+
+        function displayVerificationResult(data) {
+            currentScannedData = data; // Simpan untuk fitur generate link
+            
+            document.getElementById('scan-camera-container').classList.add('hidden');
+            document.getElementById('scan-result').classList.remove('hidden');
+            
+            document.getElementById('res-nomor').textContent = data.nomor || "-";
+            document.getElementById('res-tanggal').textContent = data.tanggal ? formatDateIndo(data.tanggal) : "-";
+            document.getElementById('res-perihal').textContent = data.perihal || "-";
+        }
+
+        function copyValidationLink() {
+            if (!currentScannedData) return;
+
+            // Buat objek data minimalis untuk menghemat panjang URL
+            const minData = {
+                n: currentScannedData.nomor,
+                t: currentScannedData.tanggal,
+                p: currentScannedData.perihal
+            };
+
+            const jsonStr = JSON.stringify(minData);
+            const base64 = btoa(jsonStr);
+            
+            // Buat Link: URL Saat Ini + #v= + Base64
+            const baseUrl = window.location.href.split('#')[0];
+            const link = `${baseUrl}#v=${base64}`;
+
+            // Salin ke clipboard
+            navigator.clipboard.writeText(link).then(() => {
+                showToast("Link validasi berhasil disalin!");
+            }).catch(err => {
+                showToast("Gagal menyalin link.", true);
+            });
+        }
+
+        function resetScanner() {
+            // Bersihkan hash agar kembali ke mode scan normal
+            history.replaceState(null, null, ' ');
+            startScanner();
+        }
+
+        // --- EXISTING LOGIC BELOW ---
+
+        async function analyzePDF(inputElement) {
+            const file = inputElement.files[0];
+            const optionsDiv = document.getElementById('pdfOptions');
+            
+            if (file) {
+                optionsDiv.classList.remove('hidden');
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdfDoc = await PDFDocument.load(arrayBuffer);
+                    const pages = pdfDoc.getPages();
+                    const totalPages = pages.length;
+                    const lastPage = pages[totalPages - 1];
+                    const { width, height } = lastPage.getSize();
+
+                    document.getElementById('pdfPage').value = totalPages;
+                    
+                    const estimatedWidth = 350;
+                    const autoX = Math.round(width - estimatedWidth - 30); 
+                    const autoY = 50; 
+
+                    document.getElementById('pdfX').value = autoX > 0 ? autoX : 350;
+                    document.getElementById('pdfY').value = autoY;
+
+                    const infoTag = document.getElementById('pageInfoTag');
+                    infoTag.textContent = `Hal ${totalPages} dari ${totalPages}`;
+                    
+                } catch (e) {
+                    console.error("Gagal baca PDF", e);
+                }
+            } else {
+                optionsDiv.classList.add('hidden');
+            }
+        }
+
+        document.getElementById('logoInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    currentLogoUrl = evt.target.result;
+                    document.getElementById('logoPreview').src = currentLogoUrl;
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        async function processForm() {
+            const nomor = document.getElementById('nomor').value.trim();
+            const tanggal = document.getElementById('tanggal').value;
+            const perihal = document.getElementById('perihal').value.trim();
+            const pdfFile = document.getElementById('pdfInput').files[0];
+            const useLinkMode = document.getElementById('useLinkMode').checked;
+
+            if (!nomor || !tanggal || !perihal) return;
+
+            document.getElementById('loadingOverlay').classList.remove('hidden');
+
+            try {
+                await db.surat.add({
+                    nomor: nomor,
+                    tanggal: tanggal,
+                    perihal: perihal,
+                    created_at: new Date()
+                });
+
+                const qrCanvas = await generateQRCanvas(nomor, tanggal, perihal, useLinkMode);
+                updatePreviewUI(nomor, tanggal, qrCanvas);
+
+                if (pdfFile) {
+                    await embedQRToPDF(pdfFile, qrCanvas);
+                    document.getElementById('btnDownloadPDF').classList.remove('hidden');
+                    document.getElementById('pdfStatusMsg').classList.remove('hidden');
+                    document.getElementById('btnDownloadPDF').classList.add('flex');
+                    showToast("PDF Surat berhasil digenerate!");
+                } else {
+                    generatedPdfBytes = null;
+                    document.getElementById('btnDownloadPDF').classList.add('hidden');
+                    document.getElementById('pdfStatusMsg').classList.add('hidden');
+                    document.getElementById('btnDownloadPDF').classList.remove('flex');
+                    showToast("QR Code berhasil dibuat!");
+                }
+
+            } catch (error) {
+                console.error(error);
+                showToast("Terjadi kesalahan: " + error.message, true);
+            } finally {
+                document.getElementById('loadingOverlay').classList.add('hidden');
+            }
+        }
+
+        function generateQRCanvas(nomor, tanggal, perihal, useLinkMode) {
+            return new Promise((resolve, reject) => {
+                let qrData = "";
+
+                if (useLinkMode) {
+                    // Generate Link URL Mode
+                    const minData = { n: nomor, t: tanggal, p: perihal };
+                    const base64 = btoa(JSON.stringify(minData));
+                    // Base URL (hapus hash yang mungkin ada)
+                    const baseUrl = window.location.href.split('#')[0];
+                    qrData = `${baseUrl}#v=${base64}`;
+                } else {
+                    // Text Mode (Default)
+                    qrData = `Nomor: ${nomor}\nTanggal: ${tanggal}\nPerihal: ${perihal}`;
+                }
+                
+                const tempDiv = document.createElement('div');
+                const qrSize = 350; 
+                new QRCode(tempDiv, {
+                    text: qrData, width: qrSize, height: qrSize, 
+                    colorDark : "#000000", colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+
+                setTimeout(() => {
+                    const sourceCanvas = tempDiv.querySelector('canvas');
+                    if(!sourceCanvas) { reject("Gagal generate QR"); return; }
+
+                    const textWidth = 600; 
+                    const padding = 35; 
+                    const finalWidth = qrSize + textWidth + (padding * 3); 
+                    const finalHeight = Math.max(qrSize, 350) + (padding * 2);
+
+                    const finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = finalWidth;
+                    finalCanvas.height = finalHeight;
+                    const ctx = finalCanvas.getContext('2d');
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.fillRect(0, 0, finalWidth, finalHeight);
+
+                    ctx.strokeStyle = "#000000";
+                    ctx.lineWidth = 8;
+                    ctx.strokeRect(5, 5, finalWidth - 10, finalHeight - 10);
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(16, 16, finalWidth - 32, finalHeight - 32);
+
+                    const qrX = padding + 20;
+                    const qrY = (finalHeight - qrSize) / 2; 
+                    ctx.drawImage(sourceCanvas, qrX, qrY);
+
+                    ctx.fillStyle = "#000000";
+                    ctx.textBaseline = "top"; 
+                    
+                    const textX = qrX + qrSize + 40; 
+                    let textY = qrY + 10; 
+
+                    const fontSize = 24; 
+                    const lineHeight = 38; 
+
+                    ctx.font = `${fontSize}px Helvetica, Arial, sans-serif`;
+                    ctx.fillText("Surat ini Ditandatangani", textX, textY);
+                    textY += lineHeight;
+                    ctx.fillText("Elektronik Oleh :", textX, textY);
+                    textY += lineHeight + 10; 
+
+                    ctx.font = `bold ${fontSize}px Helvetica, Arial, sans-serif`;
+                    ctx.fillText("Kepala SDN Medokan Ayu I/270", textX, textY);
+                    textY += lineHeight + 20; 
+
+                    ctx.font = `bold ${fontSize}px Helvetica, Arial, sans-serif`;
+                    const nama = "SELAMET PUJIONO , S.Pd.";
+                    ctx.fillText(nama, textX, textY);
+                    
+                    const namaWidth = ctx.measureText(nama).width;
+                    ctx.beginPath();
+                    ctx.moveTo(textX, textY + 30);
+                    ctx.lineTo(textX + namaWidth, textY + 30);
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    textY += lineHeight;
+
+                    ctx.font = `${fontSize}px Helvetica, Arial, sans-serif`;
+                    ctx.fillText("Pembina / IV/a", textX, textY);
+                    textY += lineHeight;
+
+                    ctx.fillText("NIP.197405032006041012", textX, textY);
+
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.src = currentLogoUrl;
+                    
+                    img.onload = () => {
+                        const logoSize = qrSize * 0.18; 
+                        const logoX = qrX + (qrSize - logoSize) / 2;
+                        const logoY = qrY + (qrSize - logoSize) / 2;
+                        
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.fillRect(logoX - 2, logoY - 2, logoSize + 4, logoSize + 4);
+                        ctx.drawImage(img, logoX, logoY, logoSize, logoSize);
+                        resolve(finalCanvas);
+                    };
+                    
+                    img.onerror = () => { resolve(finalCanvas); };
+                }, 200);
+            });
+        }
+
+        async function embedQRToPDF(pdfFile, qrCanvas) {
+            const pdfBuffer = await pdfFile.arrayBuffer();
+            const pdfDoc = await PDFDocument.load(pdfBuffer);
+            
+            const qrImagePng = qrCanvas.toDataURL('image/png');
+            const qrImageEmbed = await pdfDoc.embedPng(qrImagePng);
+
+            let pageNum = parseInt(document.getElementById('pdfPage').value) - 1;
+            const inputHeight = parseInt(document.getElementById('pdfQRSize').value) || 150;
+            const xPos = parseInt(document.getElementById('pdfX').value) || 350;
+            const yPos = parseInt(document.getElementById('pdfY').value) || 50;
+
+            const pages = pdfDoc.getPages();
+            
+            if (pageNum < 0) pageNum = 0;
+            if (pageNum >= pages.length) pageNum = pages.length - 1;
+
+            const page = pages[pageNum];
+            const aspectRatio = qrImageEmbed.width / qrImageEmbed.height;
+            const finalWidth = inputHeight * aspectRatio;
+
+            page.drawImage(qrImageEmbed, {
+                x: xPos,
+                y: yPos,
+                width: finalWidth,
+                height: inputHeight,
+            });
+
+            generatedPdfBytes = await pdfDoc.save();
+        }
+
+        function updatePreviewUI(nomor, tanggal, finalCanvas) {
+            document.getElementById('placeholderState').classList.add('hidden');
+            document.getElementById('resultState').classList.remove('hidden');
+            document.getElementById('previewNomor').textContent = nomor;
+            document.getElementById('previewTanggal').textContent = formatDateIndo(tanggal);
+            
+            const displayCanvas = document.createElement('canvas');
+            const scaleFactor = 350 / finalCanvas.width;
+            displayCanvas.width = 350;
+            displayCanvas.height = finalCanvas.height * scaleFactor;
+            const ctx = displayCanvas.getContext('2d');
+            ctx.drawImage(finalCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = '';
+            qrContainer.appendChild(displayCanvas);
+        }
+
+        function downloadResultPDF() {
+            if (generatedPdfBytes) {
+                const nomorFile = document.getElementById('nomor').value.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                download(generatedPdfBytes, `surat_qr_${nomorFile}.pdf`, "application/pdf");
+            } else {
+                showToast("PDF belum digenerate.", true);
+            }
+        }
+
+        function downloadQRImage() {
+            const nomor = document.getElementById('nomor').value;
+            const tanggal = document.getElementById('tanggal').value;
+            const perihal = document.getElementById('perihal').value;
+            const useLinkMode = document.getElementById('useLinkMode').checked;
+            const nomorFile = nomor.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+            generateQRCanvas(nomor, tanggal, perihal, useLinkMode).then(canvas => {
+                 const link = document.createElement('a');
+                 link.download = `tte_qrcode_${nomorFile}.png`;
+                 link.href = canvas.toDataURL("image/png");
+                 link.click();
+            });
+        }
+
+        async function loadTableData() {
+            const tableBody = document.getElementById('tableBody');
+            const emptyMsg = document.getElementById('emptyTableMsg');
+            tableBody.innerHTML = '';
+            const allData = await db.surat.reverse().toArray();
+
+            if (allData.length === 0) {
+                emptyMsg.classList.remove('hidden');
+                return;
+            } else {
+                emptyMsg.classList.add('hidden');
+            }
+
+            allData.forEach(item => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-colors';
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formatDateIndo(item.tanggal)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.nomor}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title="${item.perihal}">${item.perihal}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button onclick="regenerateFromHistory('${item.id}')" class="text-indigo-600 hover:text-indigo-900 mr-3" title="Gunakan Data Ini"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteEntry(${item.id})" class="text-red-600 hover:text-red-900" title="Hapus"><i class="fas fa-trash"></i></button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        async function deleteEntry(id) {
+            if(confirm('Hapus data ini?')) { await db.surat.delete(id); loadTableData(); }
+        }
+
+        async function regenerateFromHistory(id) {
+            const item = await db.surat.get(parseInt(id));
+            if(item) {
+                switchTab('input');
+                document.getElementById('nomor').value = item.nomor;
+                document.getElementById('tanggal').value = item.tanggal;
+                document.getElementById('perihal').value = item.perihal;
+                showToast("Data dimuat.");
+            }
+        }
+
+        function searchTable() {
+            const filter = document.getElementById('searchInput').value.toLowerCase();
+            const rows = document.getElementById('tableBody').getElementsByTagName('tr');
+            for (let i = 0; i < rows.length; i++) {
+                const t1 = rows[i].getElementsByTagName('td')[1]?.textContent || "";
+                const t2 = rows[i].getElementsByTagName('td')[2]?.textContent || "";
+                rows[i].style.display = (t1.toLowerCase().includes(filter) || t2.toLowerCase().includes(filter)) ? "" : "none";
+            }
+        }
+
+        function resetForm() {
+            document.getElementById('qrForm').reset();
+            document.getElementById('tanggal').valueAsDate = new Date();
+            document.getElementById('resultState').classList.add('hidden');
+            document.getElementById('placeholderState').classList.remove('hidden');
+            document.getElementById('pdfOptions').classList.add('hidden');
+            generatedPdfBytes = null;
+        }
+
+        function formatDateIndo(dateString) {
+            const options = { year: 'numeric', month: 'long', day: 'numeric' };
+            return new Date(dateString).toLocaleDateString('id-ID', options);
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `fixed bottom-5 right-5 px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 z-50 ${isError ? 'bg-red-600' : 'bg-gray-800'} text-white`;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+        }
+        
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css';
+        document.head.appendChild(link);
+    </script>
+</body>
+</html>
